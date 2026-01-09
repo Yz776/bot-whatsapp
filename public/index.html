@@ -1,0 +1,215 @@
+<!doctype html>
+
+<html>
+
+<head>
+
+  <meta charset="utf-8" />
+
+  <title>Nisa Bot Web (Baileys + ZaFlow Groq)</title>
+
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+  <style>
+
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin:0; height:100vh; display:flex; color:#eee; background:#0b141a; }
+
+    #sidebar { width:320px; border-right:1px solid #222; padding:12px; box-sizing:border-box; overflow:auto; background:#131921; }
+
+    #main { flex:1; display:flex; flex-direction:column; }
+
+    .chat-item { padding:8px; border-radius:6px; cursor:pointer; margin-bottom:6px; border:1px solid transparent; }
+
+    .msg { padding:6px 10px; border-radius:8px; margin:6px 0; max-width:70%; }
+
+    .msg.in { background:#1f2937; align-self:flex-start; }
+
+    .msg.out { background:#065f46; align-self:flex-end; }
+
+    #messages { flex:1; padding:12px; overflow:auto; display:flex; flex-direction:column; }
+
+    #composer { padding:10px; border-top:1px solid #222; display:flex; gap:8px; align-items:center; }
+
+    .btn { padding:8px 12px; border-radius:6px; background:#2563eb; color:white; border:none; cursor:pointer; }
+
+    .status { font-size:12px; color:#9ca3af; margin-bottom:8px; }
+
+    .qr { word-break:break-word; background:#111827; padding:8px; border-radius:6px; font-size:12px; text-align:center; }
+
+  </style>
+
+</head>
+
+<body>
+
+  <div id="sidebar">
+
+    <div class="status" id="status">Connecting...</div>
+
+    <div id="qrbox" class="qr" style="display:none;"></div>
+
+    <h3>Chats</h3>
+
+    <div id="chats"></div>
+
+  </div>
+
+  <div id="main">
+
+    <div id="messages"></div>
+
+    <div id="composer">
+
+      <input id="text" style="flex:1;padding:8px;border:1px solid #222;border-radius:6px;background:#0b1720;color:#fff" placeholder="Ketik pesan..." />
+
+      <button id="send" class="btn">Send</button>
+
+    </div>
+
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+
+    const socket = io();
+
+    const statusEl = document.getElementById('status');
+
+    const qrBox = document.getElementById('qrbox');
+
+    const chatsEl = document.getElementById('chats');
+
+    const messagesEl = document.getElementById('messages');
+
+    const textEl = document.getElementById('text');
+
+    const sendBtn = document.getElementById('send');
+
+    let currentChatId = null;
+
+    let chats = {};
+
+    function renderChats() {
+
+      chatsEl.innerHTML = '';
+
+      Object.values(chats).sort((a,b)=>b.lastUpdated - a.lastUpdated).forEach(c => {
+
+        const div = document.createElement('div');
+
+        div.className = 'chat-item';
+
+        div.innerHTML = `<strong>${c.name}</strong><div style="font-size:12px;color:#9ca3af">${c.messageCount || 0} pesan</div>`;
+
+        div.onclick = () => { currentChatId = c.id; loadChat(c.id); };
+
+        chatsEl.appendChild(div);
+
+      });
+
+    }
+
+    function renderMessages(messages) {
+  messagesEl.innerHTML = '';
+
+  messages.forEach(m => {
+    const d = document.createElement('div');
+    d.className = 'msg ' + (m.fromMe ? 'out' : 'in');
+
+    // tampilkan nomor pengirim jika bukan fromMe
+    const sender = !m.fromMe && m.sender
+      ? `<div style="font-size:11px;color:#9ca3af;margin-bottom:2px">${m.sender}</div>`
+      : '';
+
+    d.innerHTML = sender + `<div>${m.text}</div>`;
+
+    messagesEl.appendChild(d);
+  });
+
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+
+    function loadChat(chatId) {
+
+      socket.emit('select_chat', chatId);
+
+    }
+
+    socket.on('connect', () => { statusEl.textContent = 'Connected to server'; });
+
+    socket.on('qr', (dataUrl) => {
+
+      qrBox.style.display = 'block';
+
+      qrBox.innerHTML = '<img src="'+dataUrl+'" style="width:200px;height:200px"/><div>Scan QR untuk login</div>';
+
+    });
+
+    socket.on('ready', () => { qrBox.style.display='none'; statusEl.textContent='WhatsApp connected'; });
+
+    socket.on('chat_list', (list) => {
+  chats = {};
+  list.forEach(c => {
+    chats[c.id] = {
+      id: c.id,
+      name: c.name,
+      lastUpdated: Date.now(),
+      messageCount: c.unread || 0
+    };
+  });
+  renderChats();
+});
+
+
+    socket.on('chat_messages', (data) => {
+
+      const { chatId, messages } = data;
+
+      if (chatId === currentChatId) renderMessages(messages);
+
+    });
+
+    socket.on('new_message', ({ chatId, message }) => {
+  if (!chats[chatId]) {
+    chats[chatId] = {
+      id: chatId,
+      name: chatId,
+      lastUpdated: Date.now(),
+      messageCount: 0
+    };
+  }
+
+  chats[chatId].lastUpdated = Date.now();
+  chats[chatId].messageCount++;
+
+  renderChats();
+
+  if (chatId === currentChatId) {
+    socket.emit('select_chat', chatId);
+  }
+});
+
+
+    sendBtn.addEventListener('click', () => {
+  const text = textEl.value.trim();
+  if (!currentChatId) return alert('Pilih chat dulu.');
+  if (!text) return;
+
+  socket.emit('send_message', {
+    chatId: currentChatId,
+    text
+  });
+
+  textEl.value = '';
+});
+
+
+    socket.emit('request_chat_list');
+
+  </script>
+
+</body>
+
+</html>
